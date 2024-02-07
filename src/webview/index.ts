@@ -26,7 +26,7 @@ function game() {
   scene.add(cube);
   
   const textureLoader = new TextureLoader()
-  const sm = new SpriteMaterial({ map: null, color: 0xffffff })
+  const sm = new SpriteMaterial({ map: null })
   const sprite = new Sprite(sm)
   sprite.scale.set(10, 8, 1)
   scene.add(sprite)

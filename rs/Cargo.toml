@@ -8,8 +8,10 @@ crate-type = ["cdylib"]
 
 [dependencies]
 # Default enable napi4 feature, see https://nodejs.org/api/n-api.html#node-api-version-matrix
+anyhow = "1.0"
 napi = { version = "2.12.2", default-features = false, features = ["napi4"] }
 napi-derive = "2.12.2"
+mozjpeg = "0.10.6"
 xcap = "0.0.3"
 
 [build-dependencies]

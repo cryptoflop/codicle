@@ -1,6 +1,6 @@
 import * as vscode from 'vscode'
 import { createHash } from 'crypto'
-import fs from 'fs';
+import { gzip } from 'node:zlib'
 
 import { captureScreen, captureWindow, numScreens, focusedWindowId } from "../rs/index"
 import WebViewProvider from './WebViewProvider'
@@ -12,33 +12,37 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.window.registerWebviewViewProvider('codicle.mini', webViewProvider)
   )
 
-	context.subscriptions.push(vscode.commands.registerCommand('codicle.window', () => {
-		const windowId = focusedWindowId()
-		if (windowId === null) { return }
+	function useCaptureHandler(captureFn: () => { data: Uint8Array } | null, interval = 1000) {
 		let lastHash = ""
-		setInterval(() => {
+		const handle = setInterval(() => {
 			if (vscode.window.state.focused) {
-				const capture = captureWindow(windowId)
+				const capture = captureFn()
 				if (capture) {
 					const hash = createHash('sha1').update(capture.data).digest("hex")
 					if (lastHash === hash) { return }
 					lastHash = hash
 					
-					fs.writeFile("E:/dev/codicle/out.txt", Buffer.from(capture.data).toString('base64'), () => 1)
-
 					webViewProvider.send({ ev: "capture", data: capture.data })
-					// console.log(capture)
+
+					gzip(capture.data, (err, buffer) => {
+						console.log(buffer.length, capture.data.length);
+					})
 				}
 			}
-		}, 1000)
+		}, interval)
+		return () => clearInterval(handle)
+	}
+
+	context.subscriptions.push(vscode.commands.registerCommand('codicle.window', () => {
+		const windowId = focusedWindowId()
+		if (windowId === null) { return }
+		useCaptureHandler(() => captureWindow(windowId))
 	}))
 
 	context.subscriptions.push(vscode.commands.registerCommand('codicle.screen', () => {
 		const screenIdx = 0
-		console.log(captureScreen(screenIdx))
+		useCaptureHandler(() => captureScreen(screenIdx))
 	}))
-
-	
 
 	// console.log(vscode.env.appName, vscode.env.sessionId)
 }

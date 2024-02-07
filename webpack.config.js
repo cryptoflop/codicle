@@ -36,6 +36,17 @@ const extensionConfig = {
           name: "[name].[ext]",
         }
       },
+      // {
+      //   test: /\.node/,
+      //   type: 'asset/resource',
+      //   generator: {
+      //     filename: (pathData) => {
+      //       const filenameArr = pathData.filename.split('/')
+      //       const path = filenameArr.slice(2, filenameArr.length - 2).join('/').replaceAll('..', '_')
+      //       return `${path}/[name][ext]`
+      //     }
+      //   }
+      // },
       {
         test: /\.ts$/,
         exclude: /node_modules/,

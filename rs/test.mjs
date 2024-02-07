@@ -1,8 +1,8 @@
-import { captureScreen, captureWindow } from "./index.js"
+import { captureScreen, captureWindow, focusedWindowId } from "./index.js"
 
 import fs from "fs"
 
-const a = captureWindow()
+const a = captureWindow(focusedWindowId())
 
 // const _dirname = resolve(__dirname, "..", "rs")
 
