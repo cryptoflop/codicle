@@ -45,26 +45,28 @@ function game() {
     renderer.render(scene, camera)
   })
 
-  self.addEventListener('message', e => {
-    const { ev, data } = e.data
-    switch (ev) {
-      case "capture":
-        // console.log(data) 
-        const captureBlob = new Blob([data], {type: "image/jpeg"});
-        const captureDataUri = URL.createObjectURL(captureBlob);
-        textureLoader.load(captureDataUri, (texture) => {
-          const oldTexture = sm.map
-          sm.map = texture
-          sm.needsUpdate = true;
-          oldTexture?.dispose()
-        })
-        break;
-    }
-  })
+  // self.addEventListener('message', e => {
+  //   const { ev, data } = e.data
+  //   switch (ev) {
+  //     case "capture":
+  //       // console.log(data) 
+  //       const captureBlob = new Blob([data], {type: "image/jpeg"});
+  //       const captureDataUri = URL.createObjectURL(captureBlob);
+  //       textureLoader.load(captureDataUri, (texture) => {
+  //         const oldTexture = sm.map
+  //         sm.map = texture
+  //         sm.needsUpdate = true;
+  //         oldTexture?.dispose()
+  //       })
+  //       break;
+  //   }
+  // })
 }
 
 game()
 
-// const buffer = canvas.toBuffer();
+self.addEventListener('message', e => {
+  console.log(e)
+})
 
-// fs.writeFileSync(__dirname + `image.png`, buffer)
+self.postMessage(1)

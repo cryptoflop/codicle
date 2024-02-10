@@ -9,25 +9,60 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
       {
-        "command": "codicle.window",
-        "title": "Capture Window"
-      },
-      {
-        "command": "codicle.screen",
-        "title": "Capture Screen"
+        "command": "codicle.toggle",
+        "title": "Toggle Codicle"
       }
     ],
     "views": {
       "explorer": [
         {
           "type": "webview",
-          "id": "codicle.mini",
+          "id": "codicle-exp",
           "name": "Codicle"
+        }
+      ],
+      "scm": [
+        {
+          "type": "webview",
+          "id": "codicle-scm",
+          "name": "Codicle"
+        }
+      ],
+      "test": [
+        {
+          "type": "webview",
+          "id": "codicle-tst",
+          "name": "Codicle"
+        }
+      ],
+      "debug": [
+        {
+          "type": "webview",
+          "id": "codicle-dbg",
+          "name": "Codicle"
+        }
+      ],
+      "codicle-panel": [
+        {
+          "type": "webview",
+          "id": "codicle-pnl",
+          "name": "Codicle"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "panel": [
+        {
+          "id": "codicle-panel",
+          "title": "Codicle",
+          "icon": "archive"
         }
       ]
     }
