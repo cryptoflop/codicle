@@ -28,7 +28,10 @@ export default class WebViewPanel {
 			WebViewPanel.viewType,
 			'Codicle',
 			column || vscode.ViewColumn.One,
-			{ enableScripts: true, localResourceRoots: [extensionUri] }
+			{ 
+				enableScripts: true,
+				localResourceRoots: [extensionUri] 
+			}
 		)
 
 		WebViewPanel.currentPanel = new WebViewPanel(panel, extensionUri)
