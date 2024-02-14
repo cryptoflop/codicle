@@ -51,6 +51,7 @@ export default class WebViewPanel {
 
     const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'dist', 'webview', 'index.css'))
     const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'dist', 'webview', 'index.js'))
+		const assetsUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'dist', 'webview', 'assets'))
 
     return `<!DOCTYPE html>
       <html lang="en">
@@ -59,6 +60,7 @@ export default class WebViewPanel {
           <link href="${styleUri}" rel="stylesheet">
         </head>
         <body>
+					<script>self.assetsDir = "${assetsUri.toString()}"</script>
           <script src="${scriptUri}"></script>
         </body>
       </html>
