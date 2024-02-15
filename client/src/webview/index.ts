@@ -1,4 +1,6 @@
 import { WebGLRenderer, Scene, PerspectiveCamera, AmbientLight, AnimationMixer, AnimationClip, Color, MeshLambertMaterial, Vector3, GridHelper, NormalAnimationBlendMode, AdditiveAnimationBlendMode, AnimationAction, Euler, SpriteMaterial, TextureLoader, Sprite, Group, PlaneGeometry, Mesh, Object3D, DirectionalLight, RectAreaLight, MeshPhongMaterial, MeshBasicMaterial } from 'three'
+/** @ts-ignore-next-line */
+import NetEvent from '../../../shared/NetEvents'
 
 /** @ts-ignore-next-line */
 import { GLTF, GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader'
@@ -164,7 +166,7 @@ async function game() {
     let running = false
     let turning = 0
   
-    const updateMovmentState = (e = { repeat: false, key: "w", type: "keyup" }) => {
+    const updateMovmentState = (e = { repeat: false, key: 'w', type: 'keyup' }) => {
       if (e.repeat) return
       const press = e.type === 'keydown'
       switch (e.key) {
@@ -269,6 +271,44 @@ async function game() {
   scene.add(ownCubicle.object)
 
   const textureLoader = new TextureLoader()
+
+  const socket = new WebSocket('ws://localhost:3000')
+  socket.binaryType = 'arraybuffer'
+
+  let id = 0
+  let room = 0
+  socket.addEventListener('message', e => {
+    const view = new DataView(e.data)
+    const ev = view.getUint8(0)
+
+    switch (ev) {
+      case NetEvent.ID:
+        id = view.getUint16(1)
+        break;
+      case NetEvent.ROOM:
+        room = view.getUint8(1)
+        break;
+      case NetEvent.POSITION:
+        console.log(new Vector3(
+          view.getFloat32(1 + 0),
+          view.getFloat32(1 + 4),
+          view.getFloat32(1 + 8)
+        ))
+        break;
+    }
+  })
+
+  useTicker(() => {
+    if (!socket.OPEN) return
+    const pos = player.object.position
+    const buffer = new ArrayBuffer(1 + (4 * 3))
+    const view = new DataView(buffer)
+    view.setUint8(0, NetEvent.POSITION)
+    view.setFloat32(1 + 0, pos.x)
+    view.setFloat32(1 + 4, pos.y)
+    view.setFloat32(1 + 8, pos.z)
+    socket.send(buffer)
+  }, 1)
 
   self.addEventListener('message', msg => {
     if (!msg?.data?.ev) return
