@@ -4,7 +4,6 @@ import NetEvent from "../shared/NetEvents"
 
 type UserData = { id: number, room: number }
 
-const socketById = new Map<number, ServerWebSocket<UserData>>()
 const roomState = new Map<number, Map<number, Buffer>>()
 
 let ID_COUNTER = 0
@@ -19,14 +18,15 @@ function getFreeRoom() {
   return id
 }
 
-function messageBuffer(ev: NetEvent, payloadLen: number) {
-  const buffer = Buffer.alloc(1 + payloadLen)
-  buffer.writeUint8(ev, 0)
+function createMessageBase(id: number, ev: NetEvent, payloadLen: number) {
+  const buffer = Buffer.alloc(2 + 1 + payloadLen)
+  buffer.writeInt16BE(id, 0)
+  buffer.writeUint8(ev, 2)
   return buffer
 }
 
-function createMessage(ev: NetEvent, payloadLen: number, addPayload: (buffer: Buffer) => void) {
-  const buffer = messageBuffer(ev, payloadLen)
+function createMessage(ev: NetEvent, payloadLen: number, addPayload: (buffer: Buffer) => void, id = 0) {
+  const buffer = createMessageBase(id, ev, payloadLen)
   addPayload(buffer)
   return buffer
 }
@@ -49,17 +49,27 @@ const server = Bun.serve<UserData>({
     open(ws) {
       const id = getId()
       ws.data.id = id
-      socketById.set(id, ws)
 
-      ws.sendBinary(createMessage(NetEvent.ID, 2, b => b.writeUInt16BE(id, 1)))
+      ws.sendBinary(createMessageBase(id, NetEvent.ID, 0))
 
       const room = getFreeRoom()
       ws.data.room = room
-      ws.subscribe("room:" + room)
-      ws.publish("room:" + room, createMessage(NetEvent.JOINED, 2, b => b.writeUInt16BE(id, 1)))
-      ws.sendBinary(createMessage(NetEvent.ROOM, 1, b => b.writeUint8(room, 1)))
 
-      roomState.get(room)!.forEach(b => ws.sendBinary(b))
+      roomState.get(ws.data.room)!.set(ws.data.id, createMessageBase(id, NetEvent.POSITION, 3 * 4))
+
+      ws.subscribe("room:" + room)
+      ws.publish("room:" + room, createMessageBase(id, NetEvent.JOINED, 0))
+
+      const roomLen = Array.from(roomState.get(room)!.entries()).reduce((p, [_, b]) => p + b.length, 0)
+      ws.sendBinary(createMessage(NetEvent.ROOM, 1 + roomLen, b => {
+        b.writeUint8(room, 3)
+        
+        let cursor = 4
+        roomState.get(room)!.forEach(pb => {
+          pb.copy(b, cursor)
+          cursor += pb.length
+        })
+      }))
     },
     
     message(ws, data: Buffer) {
@@ -78,8 +88,8 @@ const server = Bun.serve<UserData>({
     },
 
     close(ws) {
-      ws.publish("room:" + ws.data.room, createMessage(NetEvent.LEFT, 2, b => b.writeUInt16BE(ws.data.id, 1)))
-      socketById.delete(ws.data.id)
+      roomState.get(ws.data.room)?.delete(ws.data.id)
+      server.publish("room:" + ws.data.room, createMessageBase(ws.data.id, NetEvent.LEFT, 0))
     }
   },
 });

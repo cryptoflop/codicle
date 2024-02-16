@@ -1,4 +1,5 @@
 import { WebGLRenderer, Scene, PerspectiveCamera, AmbientLight, AnimationMixer, AnimationClip, Color, MeshLambertMaterial, Vector3, GridHelper, NormalAnimationBlendMode, AdditiveAnimationBlendMode, AnimationAction, Euler, SpriteMaterial, TextureLoader, Sprite, Group, PlaneGeometry, Mesh, Object3D, DirectionalLight, RectAreaLight, MeshPhongMaterial, MeshBasicMaterial } from 'three'
+
 /** @ts-ignore-next-line */
 import NetEvent from '../../../shared/NetEvents'
 
@@ -34,7 +35,11 @@ async function game() {
     let thenTps = then
     let ticks = 0
   
+    let active = true
+
     const render = () => {
+      if (!active) return
+
       now = performance.now()
       delta = now - then
   
@@ -54,6 +59,8 @@ async function game() {
     }
   
     render()
+    
+    return () => active = false
   }
   
   const assets = new Map<string, GLTF>()
@@ -101,6 +108,9 @@ async function game() {
     return scene
   }
   
+  const moveSpeed = 2
+  const turnSpeed = 3
+
   function createStickman() {
     const gltf = assets.get('stickman')
     const object = cloneSkeleton(gltf.scene)
@@ -110,7 +120,8 @@ async function game() {
     beforeRenderUpdate(delta => mixer.update(delta))
   
     let currentAction: AnimationAction
-    return { object, mixer, animations,
+    return { object, mixer,
+      currentAction: () => (currentAction as unknown as { _clip: { name: string }})._clip.name,
       playAnimation(name: string) {
         const clip = AnimationClip.findByName(animations, name)
         const action = mixer.clipAction(clip)
@@ -188,9 +199,6 @@ async function game() {
     document.addEventListener('keydown', updateMovmentState)
     document.addEventListener('keyup', updateMovmentState)
     updateMovmentState()
-
-    const moveSpeed = 2
-    const turnSpeed = 3
 
     const vector = new Vector3()
 
@@ -275,40 +283,134 @@ async function game() {
   const socket = new WebSocket('ws://localhost:3000')
   socket.binaryType = 'arraybuffer'
 
-  let id = 0
   let room = 0
+  let playerId = 0
+
+  const pawns = new Map<number, { pos: Vector3, rot: number } & ReturnType<typeof createStickman>>()
+
+  function spawnPawn(id: number, pos: Vector3) {
+    if (id == playerId) return
+
+    const sm = createStickman()
+    sm.object.position.copy(pos)
+    sm.playAnimation('Idle')
+    scene.add(sm.object)
+
+    pawns.set(id, { ...sm, pos, rot: 0 })
+  }
+
+  function removePawn(id: number) {
+    const pawn = pawns.get(id)!
+    scene.remove(pawn.object)
+    pawns.delete(id)
+  }
+
+  function handlePawnPosUpdate(id: number, pos: Vector3) {
+    const pawn = pawns.get(id)!
+    if (!pawn.pos.equals(pos)) {
+      if (pawn.currentAction() != 'Running') {
+        pawn.playAnimation('Running')
+      }
+      pawn.pos = pos
+    }
+  }
+
+  function handlePawnRotUpdate(id: number, rot: number) {
+    const pawn = pawns.get(id)!
+    pawn.rot = rot
+  }
+
+  const dirVec = new Vector3()
+  beforePhysicsStep(delta => {
+    pawns.forEach(pawn => {
+      if (pawn.object.rotation.y != pawn.rot) {
+        pawn.object.rotation.y = pawn.rot
+      }
+      if (!pawn.object.position.equals(pawn.pos)) {
+        const direction = dirVec.subVectors(pawn.pos, pawn.object.position).normalize()
+        if (pawn.object.position.distanceTo(pawn.pos) > 0.01) { // TODO: safe min-step
+          pawn.object.position.addScaledVector(direction, moveSpeed * delta)
+        } else {
+          pawn.object.position.copy(pawn.pos)
+          pawn.playAnimation('Idle') // TODO: fix stutter
+        }
+      }
+    })
+  })
+
   socket.addEventListener('message', e => {
     const view = new DataView(e.data)
-    const ev = view.getUint8(0)
+    let cursor = 0
+    const id = view.getUint16(cursor)
+    cursor += 2
+    const ev = view.getUint8(2)
+    cursor += 1
 
     switch (ev) {
       case NetEvent.ID:
-        id = view.getUint16(1)
-        break;
+        playerId = id
+        break
       case NetEvent.ROOM:
-        room = view.getUint8(1)
-        break;
+        room = view.getUint8(cursor)
+        cursor += 1
+        while (cursor < (view.byteLength - 4)) {
+          spawnPawn(
+            view.getUint16(cursor),
+            new Vector3(
+              view.getFloat32(cursor + 3 + 0),
+              view.getFloat32(cursor + 3 + 4),
+              view.getFloat32(cursor + 3 + 8)
+            )
+          )
+          cursor += 3 + (3 * 4)
+        }
+        break
+      case NetEvent.JOINED:
+        spawnPawn(id, new Vector3())
+        break
+      case NetEvent.LEFT:
+        removePawn(id)
+        break
       case NetEvent.POSITION:
-        console.log(new Vector3(
-          view.getFloat32(1 + 0),
-          view.getFloat32(1 + 4),
-          view.getFloat32(1 + 8)
+        handlePawnPosUpdate(id, new Vector3(
+          view.getFloat32(cursor + 0),
+          view.getFloat32(cursor + 4),
+          view.getFloat32(cursor + 8)
         ))
-        break;
+        break
+      case NetEvent.ROTATION:
+        handlePawnRotUpdate(id, view.getUint16(cursor) / 10000)
+        break
     }
   })
 
-  useTicker(() => {
-    if (!socket.OPEN) return
-    const pos = player.object.position
-    const buffer = new ArrayBuffer(1 + (4 * 3))
-    const view = new DataView(buffer)
-    view.setUint8(0, NetEvent.POSITION)
-    view.setFloat32(1 + 0, pos.x)
-    view.setFloat32(1 + 4, pos.y)
-    view.setFloat32(1 + 8, pos.z)
-    socket.send(buffer)
-  }, 1)
+  socket.addEventListener('open', () => {
+    const cancelPT = useTicker(() => {
+      if (!socket.OPEN || socket.CONNECTING) return
+      const pos = player.object.position
+      const buffer = new ArrayBuffer(1 + (3 * 4))
+      const view = new DataView(buffer)
+      view.setUint8(0, NetEvent.POSITION)
+      view.setFloat32(1 + 0, pos.x)
+      view.setFloat32(1 + 4, pos.y)
+      view.setFloat32(1 + 8, pos.z)
+      socket.send(buffer)
+    }, 6)
+
+    const cancelRT = useTicker(() => {
+      if (!socket.OPEN || socket.CONNECTING) return
+      const buffer = new ArrayBuffer(1 + 2)
+      const view = new DataView(buffer)
+      view.setUint8(0, NetEvent.ROTATION)
+      view.setUint16(1, Math.floor(player.object.rotation.y * 10000))
+      socket.send(buffer)
+    }, 6)
+
+    socket.addEventListener('close', () => {
+      cancelPT()
+      cancelRT()
+    })
+  }, { once: true })
 
   self.addEventListener('message', msg => {
     if (!msg?.data?.ev) return
