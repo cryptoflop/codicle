@@ -1,4 +1,4 @@
-import { WebGLRenderer, Scene, PerspectiveCamera, AmbientLight, AnimationMixer, AnimationClip, Color, MeshLambertMaterial, Vector3, GridHelper, NormalAnimationBlendMode, AdditiveAnimationBlendMode, AnimationAction, Euler, SpriteMaterial, TextureLoader, Sprite, Group, PlaneGeometry, Mesh, Object3D, DirectionalLight, RectAreaLight, MeshPhongMaterial, MeshBasicMaterial } from 'three'
+import { WebGLRenderer, Scene, PerspectiveCamera, AmbientLight, AnimationMixer, AnimationClip, Color, MeshLambertMaterial, Vector3, GridHelper, NormalAnimationBlendMode, AdditiveAnimationBlendMode, AnimationAction, Euler, SpriteMaterial, TextureLoader, Sprite, Group, PlaneGeometry, Mesh, Object3D, DirectionalLight, RectAreaLight, MeshPhongMaterial, MeshBasicMaterial, Quaternion } from 'three'
 
 /** @ts-ignore-next-line */
 import NetEvent from '../../../shared/NetEvents'
@@ -204,7 +204,7 @@ async function game() {
 
     beforePhysicsStep(delta => {
       if (turning != 0) {
-        object.rotation.y += (turning * turnSpeed) * delta
+        object.rotation.y += PI_2 + ((turning * turnSpeed) * delta) // TODO 
       }
       if (running) {
         object.getWorldDirection(vector)
@@ -286,7 +286,7 @@ async function game() {
   let room = 0
   let playerId = 0
 
-  const pawns = new Map<number, { pos: Vector3, rot: number } & ReturnType<typeof createStickman>>()
+  const pawns = new Map<number, { pos: Vector3, rot: Quaternion } & ReturnType<typeof createStickman>>()
 
   function spawnPawn(id: number, pos: Vector3) {
     if (id == playerId) return
@@ -296,7 +296,7 @@ async function game() {
     sm.playAnimation('Idle')
     scene.add(sm.object)
 
-    pawns.set(id, { ...sm, pos, rot: 0 })
+    pawns.set(id, { ...sm, pos, rot: new Quaternion() })
   }
 
   function removePawn(id: number) {
@@ -317,23 +317,31 @@ async function game() {
 
   function handlePawnRotUpdate(id: number, rot: number) {
     const pawn = pawns.get(id)!
-    pawn.rot = rot
+    pawn.rot = new Quaternion().setFromAxisAngle(pawn.object.up, rot)
   }
 
   const dirVec = new Vector3()
   beforePhysicsStep(delta => {
     pawns.forEach(pawn => {
-      if (pawn.object.rotation.y != pawn.rot) {
-        pawn.object.rotation.y = pawn.rot
-      }
       if (!pawn.object.position.equals(pawn.pos)) {
         const direction = dirVec.subVectors(pawn.pos, pawn.object.position).normalize()
-        if (pawn.object.position.distanceTo(pawn.pos) > 0.01) { // TODO: safe min-step
-          pawn.object.position.addScaledVector(direction, moveSpeed * delta)
+        const distance = pawn.object.position.distanceTo(pawn.pos)
+        const deltaScalar = moveSpeed * delta
+        if (distance > deltaScalar) {
+          pawn.object.position.addScaledVector(direction, deltaScalar)
         } else {
           pawn.object.position.copy(pawn.pos)
-          pawn.playAnimation('Idle') // TODO: fix stutter
+          setTimeout(() => pawn.object.position.equals(pawn.pos) && pawn.playAnimation('Idle'), 180)
         }
+      }
+    })
+  })
+
+  const PI_2 = Math.PI * 2
+  beforePhysicsStep(delta => {
+    pawns.forEach(pawn => {
+      if (!pawn.object.quaternion.equals(pawn.rot)) {
+        pawn.object.quaternion.rotateTowards(pawn.rot, turnSpeed * delta)
       }
     })
   })
@@ -385,9 +393,12 @@ async function game() {
   })
 
   socket.addEventListener('open', () => {
-    const cancelPT = useTicker(() => {
+    let lastPos = new Vector3()
+    const pt = setInterval(() => {
       if (!socket.OPEN || socket.CONNECTING) return
       const pos = player.object.position
+      if (pos.equals(lastPos)) return
+      lastPos.copy(pos)
       const buffer = new ArrayBuffer(1 + (3 * 4))
       const view = new DataView(buffer)
       view.setUint8(0, NetEvent.POSITION)
@@ -395,20 +406,25 @@ async function game() {
       view.setFloat32(1 + 4, pos.y)
       view.setFloat32(1 + 8, pos.z)
       socket.send(buffer)
-    }, 6)
+    }, 1000 / 4)
 
-    const cancelRT = useTicker(() => {
+    let lastRot = 0
+    const rt = setInterval(() => {
       if (!socket.OPEN || socket.CONNECTING) return
+      const rot = Math.abs(Math.floor((player.object.rotation.y % PI_2) * 10000))
+      if (rot == lastRot) return
+      console.log(player.object.rotation.y)
+      lastRot = rot
       const buffer = new ArrayBuffer(1 + 2)
       const view = new DataView(buffer)
       view.setUint8(0, NetEvent.ROTATION)
-      view.setUint16(1, Math.floor(player.object.rotation.y * 10000))
+      view.setUint16(1, rot)
       socket.send(buffer)
-    }, 6)
+    }, 1000 / 6)
 
     socket.addEventListener('close', () => {
-      cancelPT()
-      cancelRT()
+      clearTimeout(pt)
+      clearTimeout(rt)
     })
   }, { once: true })
 
@@ -429,12 +445,14 @@ async function game() {
     }
   })
 
-  
   useTicker(delta => {
     dispatchPhysicsStep(delta)
+  }, 44)
+  
+  useTicker(delta => {
     dispatchRenderUpdate(delta)
     renderer.render(scene, camera)
-  }, 75)
+  }, 60)
   
   window.addEventListener('resize', () => {
     const { innerWidth: width, innerHeight: height } = window
