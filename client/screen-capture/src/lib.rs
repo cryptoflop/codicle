@@ -2,7 +2,7 @@
 
 use std::io::Cursor;
 use napi::bindgen_prelude::Uint8Array;
-use xcap::{image::{codecs::jpeg::{JpegEncoder, JpegDecoder}, ImageBuffer, ImageDecoder, Rgba}, Monitor, Window};
+use xcap::{image::{codecs::jpeg::{JpegDecoder, JpegEncoder}, imageops, ImageDecoder, RgbaImage}, Monitor, Window};
 
 #[macro_use]
 extern crate napi_derive;
@@ -15,13 +15,14 @@ pub struct ImgWithMetadata {
   pub y: i32,
   pub w: u32,
   pub h: u32,
-  pub data: Uint8Array
+  pub image: Uint8Array,
+  pub thumbnail: Uint8Array
 }
 
-fn image_to_typed_u8_jpeg(capture: &ImageBuffer<Rgba<u8>, Vec<u8>>) -> Result<Uint8Array, &str> {
+fn compress_jpeg(data: &RgbaImage) -> Result<Uint8Array, String> {
   let c = std::panic::catch_unwind(move || -> std::io::Result<Vec<u8>> {
-    let mut enc_bytes = Vec::with_capacity(1_000_000);
-    let _ = capture.write_with_encoder(JpegEncoder::new_with_quality(&mut Cursor::new(&mut enc_bytes), 95));
+    let mut enc_bytes = Vec::with_capacity(500_000);
+    let _ = data.write_with_encoder(JpegEncoder::new_with_quality(&mut Cursor::new(&mut enc_bytes), 95));
 
     let mut enc_cursor = Cursor::new(&mut enc_bytes);
     let decoder = JpegDecoder::new(&mut enc_cursor).unwrap();
@@ -30,7 +31,7 @@ fn image_to_typed_u8_jpeg(capture: &ImageBuffer<Rgba<u8>, Vec<u8>>) -> Result<Ui
 
     let mut comp = mozjpeg::Compress::new(mozjpeg::ColorSpace::JCS_RGB);
 
-    comp.set_size(capture.width().try_into().unwrap(), capture.height().try_into().unwrap());
+    comp.set_size(data.width().try_into().unwrap(), data.height().try_into().unwrap());
 
     let mut comp = comp.start_compress(Vec::new())?;
 
@@ -41,10 +42,23 @@ fn image_to_typed_u8_jpeg(capture: &ImageBuffer<Rgba<u8>, Vec<u8>>) -> Result<Ui
 
   return match c {
     Ok(bytes) => Ok(bytes.unwrap().into()),
-    Err(err) => {
-      panic!("{:?}", err.downcast_ref::<String>());
-    },
+    Err(err) =>  Err(err.downcast_ref::<String>().unwrap().to_owned()),
   }
+}
+ 
+fn image_to_typed_u8_jpeg(data: &RgbaImage) -> Result<(Uint8Array, Uint8Array), String> {
+  let image = match compress_jpeg(data) {
+    Ok(bytes) => bytes,
+    Err(err) => return Err(err)
+  };
+
+  let tumbnail_data = imageops::resize(data, data.width() / 8, data.height() / 8, imageops::FilterType::Lanczos3);
+  let tumbnail: Uint8Array = match compress_jpeg(&tumbnail_data) {
+    Ok(bytes) => bytes,
+    Err(err) => return Err(err)
+  };
+
+  Ok((image, tumbnail))
 }
 
 #[napi]
@@ -58,19 +72,23 @@ pub fn capture_screen(n: u32) -> Option<ImgWithMetadata> {
 
   let mut i: u32 = 0;
   for monitor in monitors {
-    if i != n { continue }; i += 1;
+    if i != n {
+      i += 1;
+      continue
+    };
     let res = monitor.capture_image();
     match res {
       Ok(capture) => {
         return match image_to_typed_u8_jpeg(&capture) {
-          Ok(bytes) => Some(ImgWithMetadata {
+          Ok(img_data) => Some(ImgWithMetadata {
             id: monitor.id(),
             name: String::from(monitor.name()),
             x: monitor.x(),
             y: monitor.y(),
             w: monitor.width(),
             h: monitor.height(),
-            data: bytes
+            image: img_data.0,
+            thumbnail: img_data.1
           }),
           Err(_) => continue
         }
@@ -117,14 +135,15 @@ pub fn capture_window(id: u32) -> Option<ImgWithMetadata> {
     match res {
       Ok(capture) => {
         return match image_to_typed_u8_jpeg(&capture) {
-          Ok(bytes) => Some(ImgWithMetadata {
+          Ok(img_data) => Some(ImgWithMetadata {
             id: window.id(),
             name: String::from(window.title()),
             x: window.x(),
             y: window.y(),
             w: window.width(),
             h: window.height(),
-            data: bytes
+            image: img_data.0,
+            thumbnail: img_data.1
           }),
           Err(err) => {
             print!("{}", err);
@@ -140,14 +159,3 @@ pub fn capture_window(id: u32) -> Option<ImgWithMetadata> {
 
   None
 }
-
-
-
-
-// fn overlay() {
-  // let mut ss: RgbaImage = window.capture_image().unwrap().convert();
-  // ss = imageops::resize(&ss, ss.width() / 4, ss.height() / 4, imageops::FilterType::Lanczos3);
-
-  // let mut img = ImageBuffer::from_fn(1920 / 2, 1080 / 2, |_, _| image::Rgba([15, 35, 200, 255]));
-  // imageops::overlay(&mut img, &ss, 128, 128);
-// }

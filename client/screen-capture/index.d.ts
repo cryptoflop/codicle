@@ -10,7 +10,8 @@ export interface ImgWithMetadata {
   y: number
   w: number
   h: number
-  data: Uint8Array
+  image: Uint8Array
+  thumbnail: Uint8Array
 }
 export function numScreens(): number
 export function captureScreen(n: number): ImgWithMetadata | null

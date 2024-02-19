@@ -413,7 +413,6 @@ async function game() {
       if (!socket.OPEN || socket.CONNECTING) return
       const rot = Math.abs(Math.floor((player.object.rotation.y % PI_2) * 10000))
       if (rot == lastRot) return
-      console.log(player.object.rotation.y)
       lastRot = rot
       const buffer = new ArrayBuffer(1 + 2)
       const view = new DataView(buffer)
