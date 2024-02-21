@@ -1,4 +1,8 @@
-import { WebGLRenderer, Scene, PerspectiveCamera, AmbientLight, AnimationMixer, AnimationClip, Color, MeshLambertMaterial, Vector3, GridHelper, NormalAnimationBlendMode, AdditiveAnimationBlendMode, AnimationAction, Euler, SpriteMaterial, TextureLoader, Sprite, Group, PlaneGeometry, Mesh, Object3D, DirectionalLight, RectAreaLight, MeshPhongMaterial, MeshBasicMaterial, Quaternion } from 'three'
+import { 
+  WebGLRenderer, Scene, PerspectiveCamera, AmbientLight, AnimationMixer, AnimationClip, 
+  Color, MeshLambertMaterial, Vector3, GridHelper, AnimationAction, TextureLoader, Group, 
+  PlaneGeometry, Mesh, Object3D, RectAreaLight, Quaternion, MeshStandardMaterial, Texture, RepeatWrapping, Plane, MeshPhongMaterial, WebGLShadowMap 
+} from 'three'
 
 /** @ts-ignore-next-line */
 import NetEvent from '../../../shared/NetEvents'
@@ -13,6 +17,7 @@ import { RectAreaLightHelper } from 'three/examples/jsm/helpers/RectAreaLightHel
 /** @ts-ignore-next-line */
 const vscode = acquireVsCodeApi()
 
+const tStart = performance.now()
 
 async function game() {
   function createEventDispatcher<T extends unknown[]>() {
@@ -63,21 +68,43 @@ async function game() {
     return () => active = false
   }
   
-  const assets = new Map<string, GLTF>()
+  const assets = new Map<string, unknown>()
   function loadAssets() {
-    const loader = new GLTFLoader()
-    const load = (src: string) => new Promise<GLTF>(res => loader.load(src, res))
+    const assetsDir = (self as unknown as { assetsDir: string }).assetsDir + '/'
 
-    const assetsDir = (self as unknown as { assetsDir: string }).assetsDir
+    const texLoader = new TextureLoader()
+    const loadTex = (src: string) => new Promise<Texture>(res => texLoader.load(assetsDir + src, res))
+    const gltfLoader = new GLTFLoader()
+    const loadGLTF = (src: string) => new Promise<GLTF>(res => gltfLoader.load(assetsDir + src, res))
+
     return Promise.all([
-      load(assetsDir + '/stickman.glb').then(gltf => {
-        gltf.scene.children[0].children[0].material.metalness = 0
+      loadTex('ground.png').then(tex => {
+        tex.wrapS = RepeatWrapping
+        tex.wrapT = RepeatWrapping
+        assets.set('ground', tex)
+      }),
+      loadGLTF('stickman.glb').then(gltf => {
+        const mesh = gltf.scene.children[0].children[0]
+        mesh.material = new MeshStandardMaterial({ color: 0xffffff })
         assets.set('stickman', gltf)
       }),
-      load(assetsDir + '/mac_ex.glb').then(gltf => assets.set('desktop', gltf)),
-      load(assetsDir + '/cubicle.glb').then(gltf => assets.set('cubicle', gltf))
+      loadGLTF('desktop.glb').then(gltf => {
+        gltf.scene.children[0].children[0].children[0].material = new MeshStandardMaterial({ color: 0xffffff })
+        assets.set('desktop', gltf)
+      }),
+      loadGLTF('cubicle.glb').then(gltf => {
+        const mesh = gltf.scene.children[0].children[0].children[0]
+        mesh.material = new MeshStandardMaterial({ color: 0xffffff })
+        assets.set('cubicle', gltf)
+      })
     ])
   }
+
+  const PI_2 = Math.PI * 2
+  const PI_H = Math.PI / 2
+
+  const moveSpeed = 2
+  const turnSpeed = 3
 
   function createCamera(width: number, height: number) {
     const camera = new PerspectiveCamera(75, width / height, 0.1, 1000)
@@ -87,9 +114,11 @@ async function game() {
   
   function createScene() {
     const scene = new Scene()
-    scene.background = new Color(0x000000)
+    scene.background = new Color(0xaaaaaa)
     
-    scene.add(new GridHelper())
+    // const gh = new GridHelper()
+    // gh.position.y = 0.001
+    // scene.add(gh)
 
     const light = new AmbientLight(0xffffff, 0.5)
     scene.add(light)
@@ -97,22 +126,27 @@ async function game() {
     const width = 10
     const height = 10
     const intensity = 2.2
-    const rectLight = new RectAreaLight( 0xffffff, intensity,  width, height )
-    rectLight.position.set( 0, 10, 0 )
+    const rectLight = new RectAreaLight(0xffffff, intensity,  width, height)
+    rectLight.position.set(0, 10, 0)
     rectLight.lookAt(0, 0, 0)
     scene.add(rectLight)
+    
+    const rectLightHelper = new RectAreaLightHelper(rectLight)
+    rectLight.add(rectLightHelper)
 
-    const rectLightHelper = new RectAreaLightHelper( rectLight )
-    rectLight.add( rectLightHelper )
-  
+    const gw = 10, gd = 50
+    const ground = new Mesh(new PlaneGeometry(gw, gd), new MeshStandardMaterial({ metalness: 0, roughness: 1 }))
+    ground.rotation.x = -PI_H
+    const groundTex = assets.get('ground') as Texture
+    groundTex.repeat.set(gw / 4, gd / 2)
+    ground.material.map = groundTex
+    scene.add(ground)
+    
     return scene
   }
-  
-  const moveSpeed = 2
-  const turnSpeed = 3
 
   function createStickman() {
-    const gltf = assets.get('stickman')
+    const gltf = assets.get('stickman') as GLTF
     const object = cloneSkeleton(gltf.scene)
     const mixer = new AnimationMixer(object)
     const animations = gltf.animations
@@ -217,19 +251,16 @@ async function game() {
 
   function createDesktop() {
     const group = new Group()
-    // const sm = new SpriteMaterial({ map: null })
-    // const sprite = new Sprite(sm)
-    // sprite.scale.set(2, 1, 1)
 
-    const desktop = assets.get('desktop').scene.clone() as Object3D
-    desktop.scale.addScalar(0.5)
+    const desktop = (assets.get('desktop') as GLTF).scene.clone() as Object3D
+    desktop.scale.subScalar(0.1)
     group.add(desktop)
 
     const geometry = new PlaneGeometry(0.721, 0.414)
     const material = new MeshLambertMaterial({ color: 0xffffff })
     const screen = new Mesh(geometry, material)
-    screen.position.add(new Vector3(0.0564, 0.43, 0.174))
-    screen.rotation.x = -0.07
+    screen.position.add(new Vector3(0.05, 0.4, 0.0))
+    screen.rotation.setFromVector3(new Vector3(0, PI_H, 0.))
     group.add(screen)
 
     return { object: group, screen }
@@ -238,14 +269,13 @@ async function game() {
   function createCubicle() {
     const group = new Group()
     const desktop = createDesktop()
-    desktop.object.position.y += 0.8
-    desktop.object.position.x += 0.05
-    desktop.object.position.z -= 0.3
+    desktop.object.position.y += 0.74
+    desktop.object.position.x += 0.48
+    desktop.object.position.z += 0.0
     group.add(desktop.object)
 
-    const cubicle = assets.get('cubicle').scene.clone() as Object3D
-    cubicle.scale.subScalar(0.785)
-    cubicle.position.add(new Vector3(-1, 0, 1.5))
+    const cubicle = (assets.get('cubicle') as GLTF).scene.clone() as Object3D
+    cubicle.scale.subScalar(0.3)
     group.add(cubicle)
 
     return {
@@ -337,7 +367,6 @@ async function game() {
     })
   })
 
-  const PI_2 = Math.PI * 2
   beforePhysicsStep(delta => {
     pawns.forEach(pawn => {
       if (!pawn.object.quaternion.equals(pawn.rot)) {
@@ -460,6 +489,8 @@ async function game() {
     renderer.setSize(width, height)
     renderer.render(scene, camera)
   })
+
+  console.log('startup: ' + ((performance.now() - tStart) / 1000).toFixed(2) + 's')
 }
 
 game()
