@@ -1,7 +1,7 @@
 import { 
   WebGLRenderer, Scene, PerspectiveCamera, AmbientLight, AnimationMixer, AnimationClip, 
   Color, MeshLambertMaterial, Vector3, GridHelper, AnimationAction, TextureLoader, Group, 
-  PlaneGeometry, Mesh, Object3D, RectAreaLight, Quaternion, MeshStandardMaterial, Texture, RepeatWrapping, Plane, MeshPhongMaterial, WebGLShadowMap 
+  PlaneGeometry, Mesh, Object3D, RectAreaLight, Quaternion, MeshStandardMaterial, Texture, RepeatWrapping, CubeTextureLoader, CubeTexture,
 } from 'three'
 
 /** @ts-ignore-next-line */
@@ -123,25 +123,15 @@ async function game() {
     const light = new AmbientLight(0xffffff, 0.5)
     scene.add(light)
 
-    const width = 10
-    const height = 10
-    const intensity = 2.2
-    const rectLight = new RectAreaLight(0xffffff, intensity,  width, height)
-    rectLight.position.set(0, 10, 0)
-    rectLight.lookAt(0, 0, 0)
-    scene.add(rectLight)
-    
-    const rectLightHelper = new RectAreaLightHelper(rectLight)
-    rectLight.add(rectLightHelper)
-
-    const gw = 10, gd = 50
-    const ground = new Mesh(new PlaneGeometry(gw, gd), new MeshStandardMaterial({ metalness: 0, roughness: 1 }))
+    const gw = 12, gd = 36
+    const ground = new Mesh(new PlaneGeometry(gw, gd), new MeshStandardMaterial())
     ground.rotation.x = -PI_H
+    ground.position.z = 13
     const groundTex = assets.get('ground') as Texture
     groundTex.repeat.set(gw / 4, gd / 2)
     ground.material.map = groundTex
     scene.add(ground)
-    
+
     return scene
   }
 
@@ -304,174 +294,212 @@ async function game() {
   useThirdPersonController(player, camera)
   scene.add(player.object)
 
-  const ownCubicle = createCubicle()
-  const ownScreenMat = ownCubicle.desktop.screen.material
-  scene.add(ownCubicle.object)
+  const cubicles: ReturnType<typeof createCubicle>[] = []
 
-  const textureLoader = new TextureLoader()
+  function spawnCubicles() {
+    const group = new Group()
 
-  const socket = new WebSocket('ws://localhost:3000')
-  socket.binaryType = 'arraybuffer'
+    for (let i = 0; i < 20; i++) {
+      const cubicle = createCubicle()
 
-  let room = 0
-  let playerId = 0
-
-  const pawns = new Map<number, { pos: Vector3, rot: Quaternion } & ReturnType<typeof createStickman>>()
-
-  function spawnPawn(id: number, pos: Vector3) {
-    if (id == playerId) return
-
-    const sm = createStickman()
-    sm.object.position.copy(pos)
-    sm.playAnimation('Idle')
-    scene.add(sm.object)
-
-    pawns.set(id, { ...sm, pos, rot: new Quaternion() })
-  }
-
-  function removePawn(id: number) {
-    const pawn = pawns.get(id)!
-    scene.remove(pawn.object)
-    pawns.delete(id)
-  }
-
-  function handlePawnPosUpdate(id: number, pos: Vector3) {
-    const pawn = pawns.get(id)!
-    if (!pawn.pos.equals(pos)) {
-      if (pawn.currentAction() != 'Running') {
-        pawn.playAnimation('Running')
+      if (i % 2) {
+        cubicle.object.position.z = (i - 1) * 1.5
+        cubicle.object.rotateY(Math.PI)
+      } else {
+        cubicle.object.position.z = i * 1.5
       }
-      pawn.pos = pos
+
+      group.add(cubicle.object)
+      cubicles.push(cubicle)
     }
+
+    for (let i = 0; i < 4; i++) {
+      const l = new RectAreaLight(0xffffff, 5, 1, 4)
+      l.position.set(-2, 6, (i * 8) + 1.5)
+      l.rotateX(-PI_H)
+      const lh = new RectAreaLightHelper(l)
+      l.add(lh)
+      group.add(l)
+
+      const r = new RectAreaLight(0xffffff, 5, 1, 4)
+      r.position.set(2, 6, (i * 8) + 1.5)
+      r.rotateX(-PI_H)
+      const rh = new RectAreaLightHelper(r)
+      r.add(rh)
+      group.add(r)
+    }
+
+    scene.add(group)
   }
 
-  function handlePawnRotUpdate(id: number, rot: number) {
-    const pawn = pawns.get(id)!
-    pawn.rot = new Quaternion().setFromAxisAngle(pawn.object.up, rot)
-  }
+  spawnCubicles()
 
-  const dirVec = new Vector3()
-  beforePhysicsStep(delta => {
-    pawns.forEach(pawn => {
-      if (!pawn.object.position.equals(pawn.pos)) {
-        const direction = dirVec.subVectors(pawn.pos, pawn.object.position).normalize()
-        const distance = pawn.object.position.distanceTo(pawn.pos)
-        const deltaScalar = moveSpeed * delta
-        if (distance > deltaScalar) {
-          pawn.object.position.addScaledVector(direction, deltaScalar)
-        } else {
-          pawn.object.position.copy(pawn.pos)
-          setTimeout(() => pawn.object.position.equals(pawn.pos) && pawn.playAnimation('Idle'), 180)
+  function useNetwork() {
+    const socket = new WebSocket('ws://localhost:3000')
+    socket.binaryType = 'arraybuffer'
+
+    let room = 0
+    let playerId = 0
+
+    const pawns = new Map<number, { pos: Vector3, rot: Quaternion } & ReturnType<typeof createStickman>>()
+
+    function spawnPawn(id: number, pos: Vector3) {
+      if (id == playerId) return
+
+      const sm = createStickman()
+      sm.object.position.copy(pos)
+      sm.playAnimation('Idle')
+      scene.add(sm.object)
+
+      pawns.set(id, { ...sm, pos, rot: new Quaternion() })
+    }
+
+    function removePawn(id: number) {
+      const pawn = pawns.get(id)!
+      scene.remove(pawn.object)
+      pawns.delete(id)
+    }
+
+    function handlePawnPosUpdate(id: number, pos: Vector3) {
+      const pawn = pawns.get(id)!
+      if (!pawn.pos.equals(pos)) {
+        if (pawn.currentAction() != 'Running') {
+          pawn.playAnimation('Running')
         }
+        pawn.pos = pos
       }
+    }
+
+    function handlePawnRotUpdate(id: number, rot: number) {
+      const pawn = pawns.get(id)!
+      pawn.rot = new Quaternion().setFromAxisAngle(pawn.object.up, rot)
+    }
+
+    const dirVec = new Vector3()
+    beforePhysicsStep(delta => {
+      pawns.forEach(pawn => {
+        if (!pawn.object.position.equals(pawn.pos)) {
+          const direction = dirVec.subVectors(pawn.pos, pawn.object.position).normalize()
+          const distance = pawn.object.position.distanceTo(pawn.pos)
+          const deltaScalar = moveSpeed * delta
+          if (distance > deltaScalar) {
+            pawn.object.position.addScaledVector(direction, deltaScalar)
+          } else {
+            pawn.object.position.copy(pawn.pos)
+            setTimeout(() => pawn.object.position.equals(pawn.pos) && pawn.playAnimation('Idle'), 180)
+          }
+        }
+      })
     })
-  })
 
-  beforePhysicsStep(delta => {
-    pawns.forEach(pawn => {
-      if (!pawn.object.quaternion.equals(pawn.rot)) {
-        pawn.object.quaternion.rotateTowards(pawn.rot, turnSpeed * delta)
-      }
+    beforePhysicsStep(delta => {
+      pawns.forEach(pawn => {
+        if (!pawn.object.quaternion.equals(pawn.rot)) {
+          pawn.object.quaternion.rotateTowards(pawn.rot, turnSpeed * delta)
+        }
+      })
     })
-  })
 
-  socket.addEventListener('message', e => {
-    const view = new DataView(e.data)
-    let cursor = 0
-    const id = view.getUint16(cursor)
-    cursor += 2
-    const ev = view.getUint8(2)
-    cursor += 1
+    socket.addEventListener('message', e => {
+      const view = new DataView(e.data)
+      let cursor = 0
+      const id = view.getUint16(cursor)
+      cursor += 2
+      const ev = view.getUint8(2)
+      cursor += 1
 
-    switch (ev) {
-      case NetEvent.ID:
-        playerId = id
-        break
-      case NetEvent.ROOM:
-        room = view.getUint8(cursor)
-        cursor += 1
-        while (cursor < (view.byteLength - 4)) {
-          spawnPawn(
-            view.getUint16(cursor),
-            new Vector3(
-              view.getFloat32(cursor + 3 + 0),
-              view.getFloat32(cursor + 3 + 4),
-              view.getFloat32(cursor + 3 + 8)
+      switch (ev) {
+        case NetEvent.ID:
+          playerId = id
+          break
+        case NetEvent.ROOM:
+          room = view.getUint8(cursor)
+          cursor += 1
+          while (cursor < (view.byteLength - 4)) {
+            spawnPawn(
+              view.getUint16(cursor),
+              new Vector3(
+                view.getFloat32(cursor + 3 + 0),
+                view.getFloat32(cursor + 3 + 4),
+                view.getFloat32(cursor + 3 + 8)
+              )
             )
-          )
-          cursor += 3 + (3 * 4)
-        }
-        break
-      case NetEvent.JOINED:
-        spawnPawn(id, new Vector3())
-        break
-      case NetEvent.LEFT:
-        removePawn(id)
-        break
-      case NetEvent.POSITION:
-        handlePawnPosUpdate(id, new Vector3(
-          view.getFloat32(cursor + 0),
-          view.getFloat32(cursor + 4),
-          view.getFloat32(cursor + 8)
-        ))
-        break
-      case NetEvent.ROTATION:
-        handlePawnRotUpdate(id, view.getUint16(cursor) / 10000)
-        break
-    }
-  })
-
-  socket.addEventListener('open', () => {
-    let lastPos = new Vector3()
-    const pt = setInterval(() => {
-      if (!socket.OPEN || socket.CONNECTING) return
-      const pos = player.object.position
-      if (pos.equals(lastPos)) return
-      lastPos.copy(pos)
-      const buffer = new ArrayBuffer(1 + (3 * 4))
-      const view = new DataView(buffer)
-      view.setUint8(0, NetEvent.POSITION)
-      view.setFloat32(1 + 0, pos.x)
-      view.setFloat32(1 + 4, pos.y)
-      view.setFloat32(1 + 8, pos.z)
-      socket.send(buffer)
-    }, 1000 / 4)
-
-    let lastRot = 0
-    const rt = setInterval(() => {
-      if (!socket.OPEN || socket.CONNECTING) return
-      const rot = Math.abs(Math.floor((player.object.rotation.y % PI_2) * 10000))
-      if (rot == lastRot) return
-      lastRot = rot
-      const buffer = new ArrayBuffer(1 + 2)
-      const view = new DataView(buffer)
-      view.setUint8(0, NetEvent.ROTATION)
-      view.setUint16(1, rot)
-      socket.send(buffer)
-    }, 1000 / 6)
-
-    socket.addEventListener('close', () => {
-      clearTimeout(pt)
-      clearTimeout(rt)
+            cursor += 3 + (3 * 4)
+          }
+          break
+        case NetEvent.JOINED:
+          spawnPawn(id, new Vector3())
+          break
+        case NetEvent.LEFT:
+          removePawn(id)
+          break
+        case NetEvent.POSITION:
+          handlePawnPosUpdate(id, new Vector3(
+            view.getFloat32(cursor + 0),
+            view.getFloat32(cursor + 4),
+            view.getFloat32(cursor + 8)
+          ))
+          break
+        case NetEvent.ROTATION:
+          handlePawnRotUpdate(id, view.getUint16(cursor) / 10000)
+          break
+      }
     })
-  }, { once: true })
 
-  self.addEventListener('message', msg => {
-    if (!msg?.data?.ev) return
-    const { ev, data } = msg.data
-    switch (ev) {
-      case 'capture':
-        const captureBlob = new Blob([data], {type: 'image/jpeg'})
-        const captureDataUri = URL.createObjectURL(captureBlob)
-        textureLoader.load(captureDataUri, (texture) => {
-          const oldTexture = ownScreenMat.map
-          ownScreenMat.map = texture
-          ownScreenMat.needsUpdate = true
-          oldTexture?.dispose()
-        })
-        break
-    }
-  })
+    socket.addEventListener('open', () => {
+      let lastPos = new Vector3()
+      const pt = setInterval(() => {
+        if (!socket.OPEN || socket.CONNECTING) return
+        const pos = player.object.position
+        if (pos.equals(lastPos)) return
+        lastPos.copy(pos)
+        const buffer = new ArrayBuffer(1 + (3 * 4))
+        const view = new DataView(buffer)
+        view.setUint8(0, NetEvent.POSITION)
+        view.setFloat32(1 + 0, pos.x)
+        view.setFloat32(1 + 4, pos.y)
+        view.setFloat32(1 + 8, pos.z)
+        socket.send(buffer)
+      }, 1000 / 4)
+
+      let lastRot = 0
+      const rt = setInterval(() => {
+        if (!socket.OPEN || socket.CONNECTING) return
+        const rot = Math.abs(Math.floor((player.object.rotation.y % PI_2) * 10000))
+        if (rot == lastRot) return
+        lastRot = rot
+        const buffer = new ArrayBuffer(1 + 2)
+        const view = new DataView(buffer)
+        view.setUint8(0, NetEvent.ROTATION)
+        view.setUint16(1, rot)
+        socket.send(buffer)
+      }, 1000 / 6)
+
+      socket.addEventListener('close', () => {
+        clearTimeout(pt)
+        clearTimeout(rt)
+      })
+    }, { once: true })
+
+    // const textureLoader = new TextureLoader()
+    // self.addEventListener('message', msg => {
+    //   if (!msg?.data?.ev) return
+    //   const { ev, data } = msg.data
+    //   switch (ev) {
+    //     case 'capture':
+    //       const captureBlob = new Blob([data], {type: 'image/jpeg'})
+    //       const captureDataUri = URL.createObjectURL(captureBlob)
+    //       textureLoader.load(captureDataUri, (texture) => {
+    //         const oldTexture = ownScreenMat.map
+    //         ownScreenMat.map = texture
+    //         ownScreenMat.needsUpdate = true
+    //         oldTexture?.dispose()
+    //       })
+    //       break
+    //   }
+    // })
+  }
+
 
   useTicker(delta => {
     dispatchPhysicsStep(delta)
