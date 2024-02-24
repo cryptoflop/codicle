@@ -1,7 +1,7 @@
 import { 
   WebGLRenderer, Scene, PerspectiveCamera, AmbientLight, AnimationMixer, AnimationClip, 
   Color, MeshLambertMaterial, Vector3, GridHelper, AnimationAction, TextureLoader, Group, 
-  PlaneGeometry, Mesh, Object3D, RectAreaLight, Quaternion, MeshStandardMaterial, Texture, RepeatWrapping, CubeTextureLoader, CubeTexture,
+  PlaneGeometry, Mesh, Object3D, RectAreaLight, Quaternion, MeshStandardMaterial, Texture, RepeatWrapping, CubeTextureLoader, CubeTexture, MeshBasicMaterial, Fog,
 } from 'three'
 
 /** @ts-ignore-next-line */
@@ -13,6 +13,15 @@ import { GLTF, GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader'
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js'
 /** @ts-ignore-next-line */
 import { RectAreaLightHelper } from 'three/examples/jsm/helpers/RectAreaLightHelper.js'
+/** @ts-ignore-next-line */
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
+/** @ts-ignore-next-line */
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
+/** @ts-ignore-next-line */
+import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js'
+/** @ts-ignore-next-line */
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
+
 
 /** @ts-ignore-next-line */
 const vscode = acquireVsCodeApi()
@@ -89,7 +98,7 @@ async function game() {
         assets.set('stickman', gltf)
       }),
       loadGLTF('desktop.glb').then(gltf => {
-        gltf.scene.children[0].children[0].children[0].material = new MeshStandardMaterial({ color: 0xffffff })
+        gltf.scene.children[0].children[0].children[0].material = new MeshStandardMaterial({ color: 0x444444 })
         assets.set('desktop', gltf)
       }),
       loadGLTF('cubicle.glb').then(gltf => {
@@ -106,33 +115,102 @@ async function game() {
   const moveSpeed = 2
   const turnSpeed = 3
 
-  function createCamera(width: number, height: number) {
+  const colorPalette = [
+    "64e2e2","ea88a5","8e9fea","88b4e3","99a4cc","aae2b1","e0b4a6","a1cccb","b5de9b","efdc96",
+    "cf78cc","8cdbd7","dbde8a","8ad98e","dec399","ded5ce","8f9493","d49898","e5b286","b888d4"
+  ]
+
+  function useRenderer() {
+    const { innerWidth: width, innerHeight: height } = window
+    const canvas = document.createElement('canvas')
+    document.body.append(canvas)
+    
+    const renderer = new WebGLRenderer({ canvas, antialias: true })
+    renderer.setSize(width, height)
+  
     const camera = new PerspectiveCamera(75, width / height, 0.1, 1000)
     camera.position.z = 10
-    return camera
+  
+    const scene = new Scene()
+  
+    const composer = new EffectComposer(renderer)
+  
+    const renderPass = new RenderPass(scene, camera)
+    composer.addPass(renderPass)
+  
+    const gtaoPass = new GTAOPass(scene, camera, width, height)
+    gtaoPass.output = GTAOPass.OUTPUT.Default
+    composer.addPass(gtaoPass)
+  
+    const aoParameters = {
+      radius: 0.5,
+      distanceExponent: 1.,
+      thickness: 1.,
+      scale: 1.,
+      samples: 16,
+      distanceFallOff: 1.,
+      screenSpaceRadius: true,
+    }
+  
+    const pdParameters = {
+      lumaPhi: 10.,
+      depthPhi: 0.01,
+      normalPhi: 0.01,
+      radius: 4.,
+      radiusExponent: 1.,
+      rings: 2.,
+      samples: 2,
+    }
+  
+    gtaoPass.updateGtaoMaterial(aoParameters)
+    gtaoPass.updatePdMaterial(pdParameters)
+    gtaoPass.blendIntensity = 0.6
+
+    composer.addPass(new OutputPass())
+
+    return {
+      scene,
+      camera,
+      renderer,
+      composer
+    }
   }
   
-  function createScene() {
-    const scene = new Scene()
-    scene.background = new Color(0xaaaaaa)
-    
+  function buildScene(scene: Scene) {
+    scene.background = new Color(0x447596)
+    // scene.fog = new Fog( 0x447596, 10, 15 );
+
     // const gh = new GridHelper()
     // gh.position.y = 0.001
     // scene.add(gh)
 
-    const light = new AmbientLight(0xffffff, 0.5)
+    const light = new AmbientLight(0xffffff, 2)
     scene.add(light)
 
-    const gw = 12, gd = 36
+    const l = new RectAreaLight(0xffffff, 5, 1, 30)
+    l.position.set(-3, 6, 12)
+    l.rotateX(-PI_H)
+    const lh = new RectAreaLightHelper(l)
+    l.add(lh)
+    scene.add(l)
+
+    const r = new RectAreaLight(0xffffff, 5, 1, 30)
+    r.position.set(3, 6, 12)
+    r.rotateX(-PI_H)
+    const rh = new RectAreaLightHelper(r)
+    r.add(rh)
+    scene.add(r)
+
+    const gw = 22, gd = 36
     const ground = new Mesh(new PlaneGeometry(gw, gd), new MeshStandardMaterial())
     ground.rotation.x = -PI_H
     ground.position.z = 13
     const groundTex = assets.get('ground') as Texture
     groundTex.repeat.set(gw / 4, gd / 2)
     ground.material.map = groundTex
+    ground.material.opacity = 0.1
+    ground.material.transparent = true
     scene.add(ground)
-
-    return scene
   }
 
   function createStickman() {
@@ -276,18 +354,11 @@ async function game() {
   
   const assetsPromise = loadAssets()
 
-  const { innerWidth: width, innerHeight: height } = window
-  const canvas = document.createElement('canvas')
-  document.body.append(canvas)
-  
-  const renderer = new WebGLRenderer({ canvas, antialias: true })
-  renderer.setSize(width, height)
-
-  const camera = createCamera(width, height)
+  const { scene, camera, renderer, composer } = useRenderer()  
 
   await assetsPromise
 
-  const scene = createScene()
+  buildScene(scene)
 
   const player = createPlayer()
   player.object.position.add(new Vector3(0, 0, 2))
@@ -309,24 +380,10 @@ async function game() {
         cubicle.object.position.z = i * 1.5
       }
 
+      (cubicle.object.children[1].children[0].children[0].children[0] as Mesh).material = new MeshBasicMaterial({ color: new Color('#' + colorPalette[i]) })
+
       group.add(cubicle.object)
       cubicles.push(cubicle)
-    }
-
-    for (let i = 0; i < 4; i++) {
-      const l = new RectAreaLight(0xffffff, 5, 1, 4)
-      l.position.set(-2, 6, (i * 8) + 1.5)
-      l.rotateX(-PI_H)
-      const lh = new RectAreaLightHelper(l)
-      l.add(lh)
-      group.add(l)
-
-      const r = new RectAreaLight(0xffffff, 5, 1, 4)
-      r.position.set(2, 6, (i * 8) + 1.5)
-      r.rotateX(-PI_H)
-      const rh = new RectAreaLightHelper(r)
-      r.add(rh)
-      group.add(r)
     }
 
     scene.add(group)
@@ -339,7 +396,7 @@ async function game() {
     socket.binaryType = 'arraybuffer'
 
     let room = 0
-    let playerId = 0
+    let playerId = 5
 
     const pawns = new Map<number, { pos: Vector3, rot: Quaternion } & ReturnType<typeof createStickman>>()
 
@@ -480,25 +537,31 @@ async function game() {
         clearTimeout(rt)
       })
     }, { once: true })
-
-    // const textureLoader = new TextureLoader()
-    // self.addEventListener('message', msg => {
-    //   if (!msg?.data?.ev) return
-    //   const { ev, data } = msg.data
-    //   switch (ev) {
-    //     case 'capture':
-    //       const captureBlob = new Blob([data], {type: 'image/jpeg'})
-    //       const captureDataUri = URL.createObjectURL(captureBlob)
-    //       textureLoader.load(captureDataUri, (texture) => {
-    //         const oldTexture = ownScreenMat.map
-    //         ownScreenMat.map = texture
-    //         ownScreenMat.needsUpdate = true
-    //         oldTexture?.dispose()
-    //       })
-    //       break
-    //   }
-    // })
   }
+
+  
+  const ownCubicle = cubicles[5]
+  const ownScreenMat = ownCubicle.desktop.screen.material;
+  (player.object.children[0].children[0] as Mesh).material = new MeshStandardMaterial({ color: new Color('#' + colorPalette[5]) })
+
+  const textureLoader = new TextureLoader()
+  self.addEventListener('message', msg => {
+    if (!msg?.data?.ev) return
+    const { ev, data } = msg.data
+    console.log(ev)
+    switch (ev) {
+      case 'capture':
+        const captureBlob = new Blob([data], {type: 'image/jpeg'})
+        const captureDataUri = URL.createObjectURL(captureBlob)
+        textureLoader.load(captureDataUri, (texture) => {
+          const oldTexture = ownScreenMat.map
+          ownScreenMat.map = texture
+          ownScreenMat.needsUpdate = true
+          oldTexture?.dispose()
+        })
+        break
+    }
+  })
 
 
   useTicker(delta => {
@@ -507,7 +570,7 @@ async function game() {
   
   useTicker(delta => {
     dispatchRenderUpdate(delta)
-    renderer.render(scene, camera)
+    composer.render()
   }, 60)
   
   window.addEventListener('resize', () => {
@@ -515,7 +578,7 @@ async function game() {
     camera.aspect = width / height
     camera.updateProjectionMatrix()
     renderer.setSize(width, height)
-    renderer.render(scene, camera)
+    composer.setSize(width, height)
   })
 
   console.log('startup: ' + ((performance.now() - tStart) / 1000).toFixed(2) + 's')
