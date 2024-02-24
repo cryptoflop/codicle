@@ -18,6 +18,10 @@
       {
         "command": "codicle.toggle",
         "title": "Toggle Codicle"
+      },
+      {
+        "command": "codicle.window",
+        "title": "Capture window"
       }
     ],
     "views": {
